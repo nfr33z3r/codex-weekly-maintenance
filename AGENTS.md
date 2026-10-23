@@ -31,6 +31,7 @@ Préparer une maintenance hebdomadaire assistée de plusieurs dépôts GitHub pr
 
 - `docs/IMPLEMENTATION-PLAN.md` : architecture et état d’implémentation.
 - `docs/V1.1-DECISIONS.md` : décisions multi-propriétaires et expérience mobile.
+- `docs/IPHONE-GUIDE.md` : parcours ntfy → GitHub → Codex, replis et validation réelle iOS.
 - `docs/RESEARCH.md` : comparaison des solutions évaluées et sources.
 - `docs/SECURITY.md` : modèle de menace et choix d’authentification.
 - `README.md` : installation, utilisation et activation manuelle exacte.

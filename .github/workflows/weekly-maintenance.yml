@@ -69,7 +69,7 @@ jobs:
           echo "count=$count" >> "$GITHUB_OUTPUT"
 
       - name: Send generic completion push
-        if: inputs.mode == 'analyze' && inputs.notify
+        if: inputs.mode == 'analyze' && inputs.notify && steps.report.outputs.count != '0'
         env:
           NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
           NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}

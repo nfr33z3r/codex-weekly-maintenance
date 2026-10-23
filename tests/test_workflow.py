@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
+import json
 import unittest
 from pathlib import Path
 
 
 WORKFLOW = Path(__file__).parents[1] / ".github" / "workflows" / "weekly-maintenance.yml"
+SCHEDULE = Path(__file__).parents[1] / "config" / "schedule.json"
 
 
 class WorkflowSecurityTests(unittest.TestCase):
@@ -16,6 +18,11 @@ class WorkflowSecurityTests(unittest.TestCase):
     def test_is_manual_only(self):
         self.assertIn("workflow_dispatch:", self.workflow)
         self.assertNotRegex(self.workflow, r"(?m)^\s+schedule:")
+        schedule = json.loads(SCHEDULE.read_text(encoding="utf-8"))
+        self.assertEqual(
+            schedule,
+            {"enabled": False, "cron_utc": None, "timezone": "Europe/Paris"},
+        )
 
     def test_has_no_write_permission(self):
         self.assertRegex(self.workflow, r"permissions:\n\s+contents: read")
@@ -36,6 +43,10 @@ class WorkflowSecurityTests(unittest.TestCase):
         self.assertIn("$GITHUB_STEP_SUMMARY", self.workflow)
         self.assertIn("actions/upload-artifact@", self.workflow)
         self.assertIn("retention-days: 7", self.workflow)
+
+    def test_report_notification_requires_at_least_one_task(self):
+        self.assertIn("steps.report.outputs.count != '0'", self.workflow)
+        self.assertEqual(self.workflow.count("Send generic completion push"), 1)
 
 
 if __name__ == "__main__":
