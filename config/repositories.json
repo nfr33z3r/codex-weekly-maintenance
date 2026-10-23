@@ -1,10 +1,18 @@
 {
   "owner_credentials": {
-    "nfr33z3r": "github_1"
+    "Zero-Limit-Agency": "github_1"
   },
   "repositories": [
     {
-      "name": "nfr33z3r/codex-weekly-maintenance",
+      "name": "Zero-Limit-Agency/ZeroLimitAgency",
+      "enabled": true
+    },
+    {
+      "name": "Zero-Limit-Agency/nowesport",
+      "enabled": true
+    },
+    {
+      "name": "Zero-Limit-Agency/discord-bot",
       "enabled": true
     }
   ]
