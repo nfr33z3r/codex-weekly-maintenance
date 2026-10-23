@@ -15,14 +15,13 @@ class WorkflowSecurityTests(unittest.TestCase):
     def setUpClass(cls):
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    def test_weekly_schedule_and_manual_execution(self):
+    def test_manual_only_until_quota_gate_available(self):
         self.assertIn("workflow_dispatch:", self.workflow)
-        self.assertIn("  schedule:\n    - cron: '17 7 * * 1'", self.workflow)
-        self.assertIn("github.event_name == 'schedule'", self.workflow)
+        self.assertNotRegex(self.workflow, r"(?m)^\s+schedule:")
         schedule = json.loads(SCHEDULE.read_text(encoding="utf-8"))
         self.assertEqual(
             schedule,
-            {"enabled": True, "cron_utc": "17 7 * * 1", "timezone": "Europe/Paris"},
+            {"enabled": False, "cron_utc": None, "timezone": "Europe/Paris", "reason": "Quota-aware gate not yet available. Never schedule maintenance on calendar alone."},
         )
 
     def test_has_no_write_permission(self):
