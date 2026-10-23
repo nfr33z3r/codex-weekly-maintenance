@@ -16,6 +16,8 @@ REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 COMMIT_SHA_RE = re.compile(r"^[0-9a-f]{40,64}$", re.I)
 SECURITY_WORDS = re.compile(r"\b(cve|security|vulnerability|vuln|auth|secret|xss|csrf|injection)\b", re.I)
 BUG_WORDS = re.compile(r"\b(bug|fix|regression|crash|failure|broken|error)\b", re.I)
+DEPENDENCY_TITLE = re.compile(r"^(bump|update|upgrade)\s+.+\s+(from|to)\s+", re.I)
+FAILED_CONCLUSIONS = frozenset({"failure", "timed_out", "startup_failure", "action_required"})
 MAX_COMMITS = 25
 MAX_PULLS = 50
 MAX_RUNS = 100
@@ -171,6 +173,7 @@ def collect_repository(
             "title": clean_text(item.get("title")),
             "state": clean_text(item.get("state"), 20),
             "draft": bool(item.get("draft")),
+            "author": clean_text(item.get("user", {}).get("login"), 80),
             "updated_at": item.get("updated_at"),
             "url": safe_github_url(item.get("html_url"), repository.name),
         }
@@ -188,6 +191,12 @@ def collect_repository(
             "name": clean_text(item.get("name")),
             "conclusion": clean_text(item.get("conclusion") or item.get("status"), 30),
             "event": clean_text(item.get("event"), 30),
+            "head_branch": clean_text(item.get("head_branch"), 200),
+            "pull_requests": [
+                clean_text(pull.get("number"), 20)
+                for pull in item.get("pull_requests", [])
+                if pull.get("number") is not None
+            ],
             "created_at": item.get("created_at"),
             "url": safe_github_url(item.get("html_url"), repository.name),
         }
@@ -229,49 +238,139 @@ def collect_repositories(
     return activities
 
 
+def _is_dependency_pull_request(item: dict[str, Any]) -> bool:
+    author = str(item.get("author", "")).lower()
+    title = str(item.get("title", ""))
+    return author in {"dependabot", "dependabot[bot]"} or bool(DEPENDENCY_TITLE.search(title))
+
+
+def _run_key(run: dict[str, Any]) -> tuple[str, str, tuple[str, ...]]:
+    return (
+        str(run.get("name", "")),
+        str(run.get("head_branch", "")),
+        tuple(sorted(str(number) for number in run.get("pull_requests", []))),
+    )
+
+
+def _failed_run_details(activity: dict[str, Any]) -> list[tuple[dict[str, Any], str]]:
+    dependency_numbers = {
+        str(item.get("number"))
+        for item in activity["pull_requests"]
+        if _is_dependency_pull_request(item)
+    }
+    successful_keys = {
+        _run_key(run)
+        for run in activity["workflow_runs"]
+        if run.get("conclusion") == "success"
+    }
+    details: list[tuple[dict[str, Any], str]] = []
+    for run in activity["workflow_runs"]:
+        if run.get("conclusion") not in FAILED_CONCLUSIONS:
+            continue
+        pull_numbers = {str(number) for number in run.get("pull_requests", [])}
+        if pull_numbers & dependency_numbers:
+            category = "dependency"
+        elif _run_key(run) in successful_keys:
+            category = "flaky"
+        elif run.get("event") == "push" and not pull_numbers:
+            category = "branch"
+        else:
+            category = "pull_request"
+        details.append((run, category))
+    return details
+
+
+def _level(score: int, medium: int, high: int) -> str:
+    if score >= high:
+        return "élevé"
+    if score >= medium:
+        return "moyen"
+    if score:
+        return "faible"
+    return "aucun"
+
+
 def prioritise(activity: dict[str, Any]) -> dict[str, Any]:
     text = " ".join(
         [item["message"] for item in activity["commits"]]
         + [item["title"] for item in activity["pull_requests"]]
     )
-    failures = sum(
-        1
-        for run in activity["workflow_runs"]
-        if run["conclusion"] in {"failure", "timed_out", "startup_failure", "action_required"}
-    )
-    score = min(len(activity["commits"]), 5) + min(len(activity["pull_requests"]), 5)
-    reasons: list[str] = []
-    if failures:
-        score += min(failures * 3, 9)
-        reasons.append(f"{failures} exécution(s) CI en échec")
-    if SECURITY_WORDS.search(text):
-        score += 8
-        reasons.append("signal de sécurité dans les métadonnées")
-    if BUG_WORDS.search(text):
-        score += 3
-        reasons.append("signal de bug ou régression")
-    if activity["commits"]:
-        reasons.append(f"{len(activity['commits'])} commit(s)")
-    if activity["pull_requests"]:
-        reasons.append(f"{len(activity['pull_requests'])} PR mise(s) à jour")
+    dependency_pulls = [
+        item for item in activity["pull_requests"] if _is_dependency_pull_request(item)
+    ]
+    regular_pulls = [
+        item for item in activity["pull_requests"] if not _is_dependency_pull_request(item)
+    ]
+    failed_runs = _failed_run_details(activity)
+    failure_counts = {
+        category: sum(1 for _, current in failed_runs if current == category)
+        for category in ("dependency", "flaky", "branch", "pull_request")
+    }
 
-    if score >= 12:
-        level = "haute"
-    elif score >= 6:
-        level = "moyenne"
-    elif score:
-        level = "basse"
-    else:
-        level = "aucune"
-    return {"score": score, "level": level, "reasons": reasons, "failures": failures}
+    activity_score = (
+        min(len(activity["commits"]), 5)
+        + min(len(regular_pulls), 5)
+        + min(len(dependency_pulls), 2)
+        + min(len(failed_runs), 2)
+    )
+    activity_reasons: list[str] = []
+    if activity["commits"]:
+        activity_reasons.append(f"{len(activity['commits'])} commit(s)")
+    if regular_pulls:
+        activity_reasons.append(f"{len(regular_pulls)} PR produit(s)")
+    if dependency_pulls:
+        activity_reasons.append(f"{len(dependency_pulls)} PR de dépendances regroupée(s)")
+    if failed_runs:
+        activity_reasons.append(f"{len(failed_runs)} échec(s) CI contextualisé(s)")
+
+    risk_score = 0
+    risk_reasons: list[str] = []
+    if SECURITY_WORDS.search(text):
+        risk_score += 8
+        risk_reasons.append("signal de sécurité dans les métadonnées")
+    if BUG_WORDS.search(text):
+        risk_score += 3
+        risk_reasons.append("signal de bug ou régression")
+    if failure_counts["branch"]:
+        risk_score += min(failure_counts["branch"] * 4, 8)
+        risk_reasons.append(f"{failure_counts['branch']} échec(s) CI sur branche")
+    if failure_counts["pull_request"]:
+        risk_score += min(failure_counts["pull_request"] * 2, 6)
+        risk_reasons.append(f"{failure_counts['pull_request']} échec(s) CI sur PR")
+    if failure_counts["flaky"]:
+        risk_score += min(failure_counts["flaky"], 2)
+        risk_reasons.append(f"{failure_counts['flaky']} signal(aux) CI intermittent(s)")
+    context_reasons: list[str] = []
+    if failure_counts["dependency"]:
+        context_reasons.append(
+            f"{failure_counts['dependency']} échec(s) CI Dependabot non assimilé(s) à la production"
+        )
+
+    risk_level = _level(risk_score, medium=3, high=8)
+    activity_level = _level(activity_score, medium=3, high=7)
+    level = risk_level if risk_score else ("routine" if activity_score else "aucune")
+    return {
+        "score": risk_score * 100 + activity_score,
+        "level": level,
+        "risk_score": risk_score,
+        "risk_level": risk_level,
+        "activity_score": activity_score,
+        "activity_level": activity_level,
+        "risk_reasons": risk_reasons,
+        "activity_reasons": activity_reasons,
+        "context_reasons": context_reasons,
+        "reasons": risk_reasons + activity_reasons + context_reasons,
+        "failures": len(failed_runs),
+        "failure_counts": failure_counts,
+    }
 
 
 def is_significant(activity: dict[str, Any], priority: dict[str, Any]) -> bool:
-    """Keep actionable activity: code/PR changes or a failing workflow."""
-    return bool(activity["commits"] or activity["pull_requests"] or priority["failures"])
+    """Create one task only when recent activity or a contextualised failure exists."""
+    return bool(priority["activity_score"] or priority["risk_score"])
 
 
-def _evidence_lines(activity: dict[str, Any]) -> list[str]:
+def _archive_evidence_lines(activity: dict[str, Any]) -> list[str]:
     lines: list[str] = []
     repository = activity["repository"]
     for item in activity["pull_requests"][:15]:
@@ -294,6 +393,74 @@ def _evidence_lines(activity: dict[str, Any]) -> list[str]:
     return lines or ["- Aucun signal dans la fenêtre."]
 
 
+def _task_evidence_lines(activity: dict[str, Any], limit: int = 15) -> list[str]:
+    """Return concise sources: grouped dependency PRs and failed CI only."""
+    repository = activity["repository"]
+    regular_pulls = [
+        item for item in activity["pull_requests"] if not _is_dependency_pull_request(item)
+    ]
+    dependency_pulls = [
+        item for item in activity["pull_requests"] if _is_dependency_pull_request(item)
+    ]
+    lines: list[str] = []
+    for run, category in _failed_run_details(activity):
+        name = clean_text(run.get("name"))
+        url = safe_github_url(run.get("url"), repository)
+        pull_numbers = ", ".join(f"#{number}" for number in run.get("pull_requests", []))
+        if category == "dependency":
+            context = "PR de dépendance ; non assimilé à un incident de production"
+        elif category == "flaky":
+            context = "succès et échec observés ; signal potentiellement intermittent"
+        elif category == "branch":
+            context = f"branche {clean_text(run.get('head_branch') or activity['branch'], 200)}"
+        else:
+            context = f"PR {pull_numbers}" if pull_numbers else "PR non identifiée"
+        lines.append(f"- CI en échec [{name}]({url}) — {context}")
+    for item in regular_pulls:
+        number = clean_text(item.get("number"), 20)
+        title = clean_text(item.get("title"))
+        url = safe_github_url(item.get("url"), repository)
+        lines.append(f"- PR #{number} : [{title}]({url})")
+    if dependency_pulls:
+        references = ", ".join(
+            f"[#{clean_text(item.get('number'), 20)}]({safe_github_url(item.get('url'), repository)})"
+            for item in dependency_pulls[:8]
+        )
+        suffix = "…" if len(dependency_pulls) > 8 else ""
+        lines.append(
+            f"- Dépendances : {len(dependency_pulls)} PR regroupée(s) — {references}{suffix}"
+        )
+    for item in activity["commits"]:
+        sha = clean_text(item.get("sha"), 64)
+        message = clean_text(item.get("message"))
+        url = safe_github_url(item.get("url"), repository)
+        lines.append(f"- Commit [{sha}]({url}) : {message}")
+    return lines[:limit] or ["- Aucun signal justifiant une tâche."]
+
+
+def _validation_plan(activity: dict[str, Any], priority: dict[str, Any]) -> list[str]:
+    dependency_only = bool(activity["pull_requests"]) and all(
+        _is_dependency_pull_request(item) for item in activity["pull_requests"]
+    )
+    if dependency_only and priority["risk_score"] == 0:
+        return [
+            "Vérifier ensemble les PR de dépendances regroupées et leurs notes de version.",
+            "Confirmer la compatibilité et l’état CI ; ne modifier le code que si un défaut est reproduit.",
+            "Exécuter uniquement les tests concernés par les dépendances retenues.",
+        ]
+    if priority["failure_counts"]["flaky"]:
+        return [
+            "Reproduire l’échec intermittent avant toute modification.",
+            "Comparer les exécutions en succès et en échec sur la même branche ou PR.",
+            "Limiter le correctif aux causes confirmées et relancer le test ciblé.",
+        ]
+    return [
+        "Confirmer chaque signal dans l’état actuel du dépôt avant de modifier.",
+        "Exécuter d’abord les tests ciblés, puis la suite pertinente au changement.",
+        "Documenter dans la PR les preuves, risques résiduels et validations réalisées.",
+    ]
+
+
 def render_report(activity: dict[str, Any], priority: dict[str, Any]) -> str:
     truncation = [key for key, value in activity["truncated"].items() if value]
     reasons = ", ".join(priority["reasons"]) or "aucune activité significative"
@@ -305,7 +472,8 @@ def render_report(activity: dict[str, Any], priority: dict[str, Any]) -> str:
 
 Fenêtre UTC : `{activity['window']['since']}` → `{activity['window']['until']}`
 Branche analysée : `{clean_text(activity['branch'], 200)}`
-Priorité déterministe : **{priority['level']}** (score {priority['score']}) — {reasons}.
+- Risque : **{priority['risk_level']}** (score {priority['risk_score']})
+- Activité : **{priority['activity_level']}** (score {priority['activity_score']}) — {reasons}.
 
 ## Synthèse
 
@@ -316,7 +484,7 @@ Priorité déterministe : **{priority['level']}** (score {priority['score']}) �
 
 ## Éléments vérifiables
 
-{chr(10).join(_evidence_lines(activity))}
+{chr(10).join(_archive_evidence_lines(activity))}
 
 ## Fichiers touchés
 
@@ -329,11 +497,17 @@ Ce rapport exploite uniquement les métadonnées de l’API GitHub, sans cloner 
 
 
 def render_prompt(activity: dict[str, Any], priority: dict[str, Any]) -> str:
+    validation = "\n".join(
+        f"{index}. {item}" for index, item in enumerate(_validation_plan(activity, priority), 1)
+    )
     return f"""# Prompt Codex Cloud — {activity['repository']}
 
 Travaille uniquement dans le dépôt `{activity['repository']}`. Lis d’abord son `AGENTS.md` et respecte toutes les instructions applicables.
 
-Objectif : effectuer une maintenance prudente à partir de l’activité des 7 derniers jours. Priorité indicative : **{priority['level']}** (score déterministe {priority['score']}).
+Objectif : effectuer une maintenance prudente à partir de l’activité des 7 derniers jours.
+
+- Risque indicatif : **{priority['risk_level']}** (score {priority['risk_score']})
+- Activité : **{priority['activity_level']}** (score {priority['activity_score']})
 
 Règles impératives :
 
@@ -346,16 +520,43 @@ Règles impératives :
 
 ## Données non fiables — fenêtre {activity['window']['since']} → {activity['window']['until']}
 
-{chr(10).join(_evidence_lines(activity))}
+{chr(10).join(_task_evidence_lines(activity))}
+
+## Plan de validation proportionné
+
+{validation}
 
 Commence par vérifier l’état actuel de ces références et de la CI, puis propose un plan bref avant l’implémentation.
 """
 
 
-def _summary_block(activity: dict[str, Any], priority: dict[str, Any], prompt: str) -> str:
-    """Render one copyable block; all remote text in prompt is already sanitised."""
-    return f"""<details open>
-<summary><strong>{activity['repository']} — priorité {priority['level']}</strong></summary>
+def _summary_block(
+    task_number: int,
+    activity: dict[str, Any],
+    priority: dict[str, Any],
+    prompt: str,
+) -> str:
+    """Render a short mobile card followed by one copyable prompt."""
+    reasons = priority["risk_reasons"] + priority["activity_reasons"]
+    reason_text = "; ".join(reasons[:4]) or "signal de maintenance contextualisé"
+    sources = "\n".join(_task_evidence_lines(activity, limit=5))
+    repository_url = f"https://github.com/{activity['repository']}"
+    return f"""## Tâche {task_number} — {activity['repository']}
+
+- **Risque :** {priority['risk_level']} ({priority['risk_score']})
+- **Activité :** {priority['activity_level']} ({priority['activity_score']})
+- **Pourquoi :** {reason_text}
+
+### Sources prioritaires
+
+{sources}
+
+[Ouvrir le dépôt]({repository_url}) · [Ouvrir Codex Cloud](https://chatgpt.com/codex)
+
+> Dans Codex Cloud, sélectionner manuellement `{activity['repository']}`. Aucun lien de préremplissage n’est supposé.
+
+<details>
+<summary><strong>Copier le prompt #{task_number}</strong></summary>
 
 ```text
 {prompt.rstrip()}
@@ -383,7 +584,7 @@ Ouvrir un bloc, copier son contenu, puis le coller dans une nouvelle tâche Code
     parts = [header]
     included = 0
     for activity, priority, prompt in prompts:
-        block = _summary_block(activity, priority, prompt)
+        block = _summary_block(included + 1, activity, priority, prompt)
         remaining = len(prompts) - included - 1
         omission_note = (
             f"⚠️ {remaining} prompt(s) supplémentaire(s) omis de ce résumé pour respecter "

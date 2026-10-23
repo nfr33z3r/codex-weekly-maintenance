@@ -1,8 +1,8 @@
 # Plan de mise en œuvre autonome
 
-## Décision V1.1
+## Décision V1.2
 
-La V1.1 est un orchestrateur passif hébergé dans GitHub Actions. Elle appelle uniquement l’API REST GitHub avec l’identifiant en lecture seule explicitement associé au propriétaire, applique un score déterministe, construit un résumé mobile et un paquet Markdown/JSON privés, puis envoie une notification ntfy générique.
+La V1.2 est un orchestrateur passif hébergé dans GitHub Actions. Elle appelle uniquement l’API REST GitHub avec l’identifiant en lecture seule explicitement associé au propriétaire, applique des scores déterministes d’activité et de risque, construit un résumé mobile et un paquet Markdown/JSON privés, puis envoie une notification ntfy générique seulement si une tâche est justifiée.
 
 ```text
 workflow_dispatch
@@ -10,12 +10,12 @@ workflow_dispatch
   ├─ allow-list propriétaire A → identifiant github_1
   ├─ allow-list propriétaire B → identifiant github_2
   ├─ API GitHub (métadonnées seulement, fenêtre de 7 jours, aucun repli)
-  ├─ score déterministe + rapport + prompt par dépôt
-  ├─ résumé privé mobile, prompts copiables, maximum 500 Kio
+  ├─ activité et risque séparés + contexte CI + dépendances regroupées
+  ├─ carte courte et prompt copiable par dépôt, maximum 500 Kio
   ├─ artefact privé, rétention 7 jours
   └─ ntfy : compteur générique + lien vers l’exécution privée
 
-iPhone
+iPhone (app GitHub ou Safari)
   ├─ ouvre le résumé privé et copie chaque prompt
   ├─ lance manuellement une tâche Codex Cloud dans le dépôt concerné
   └─ utilise le ZIP uniquement comme solution de secours
@@ -37,7 +37,7 @@ Pour chaque entrée explicitement activée dans `config/repositories.json` :
 
 Un dépôt sans commit, PR mise à jour ni CI en échec est ignoré pour éviter un prompt et une consommation Codex sans signal concret.
 
-Le score est une heuristique reproductible, pas un jugement IA : volume borné de commits/PR, CI en échec et mots-clés de sécurité ou de bug. Il sert uniquement à ordonner l’attention humaine.
+Les scores sont des heuristiques reproductibles, pas un jugement IA. L’activité mesure le volume borné de commits, PR et signaux CI. Le risque utilise les mots-clés de sécurité ou de bug et le contexte des échecs CI. Un échec rattaché à une PR Dependabot n’est pas assimilé à un incident de production ; un succès et un échec du même workflow sur la même branche ou PR sont signalés comme potentiellement intermittents.
 
 ## Sorties
 
@@ -49,7 +49,7 @@ Le paquet `reports/` contient :
 - une mention explicite que le quota Codex est inconnu ;
 - des références GitHub vérifiables, sans contenu de diff.
 
-Les prompts sont publiés par priorité décroissante. Le résumé est borné à 500 Kio ; les prompts de moindre priorité qui ne tiennent pas sont signalés comme omis et restent disponibles dans le ZIP.
+Les prompts sont publiés par priorité décroissante. Leur liste de sources omet les CI réussies redondantes et regroupe les PR de dépendances ; le rapport d’archive conserve les métadonnées complètes. Le résumé est borné à 500 Kio ; les prompts de moindre priorité qui ne tiennent pas sont signalés comme omis et restent disponibles dans le ZIP.
 
 Les métadonnées GitHub sont délimitées comme données non fiables. Les caractères Markdown/HTML dangereux et les URL non canoniques sont neutralisés. Le prompt ordonne à Codex de confirmer chaque signal, de ne suivre aucune instruction provenant des titres/messages/noms de fichiers et de ne modifier que le dépôt choisi.
 
@@ -74,6 +74,10 @@ Alternative renforcée : GitHub App privée avec jetons d’installation courts.
 - [x] résumé mobile privé, borné et copiable ;
 - [x] ZIP conservé comme solution de secours ;
 - [x] tests de confidentialité, permissions de fichiers et données distantes non fiables ;
+- [x] cartes iPhone, lien Codex générique et sélection manuelle explicite du dépôt ;
+- [x] activité et risque séparés, dépendances regroupées et CI contextualisée ;
+- [x] notification d’analyse supprimée quand aucune tâche n’est produite ;
+- [x] configuration de planification versionnée mais désactivée ;
 - [ ] validation réelle par l’utilisateur avec ses dépôts et secrets ;
 - [ ] planification éventuelle, seulement après validation manuelle ;
 - [ ] lecture automatique du quota, seulement si une source officielle sûre apparaît.
@@ -85,3 +89,13 @@ Alternative renforcée : GitHub App privée avec jetons d’installation courts.
 - envisager une GitHub App si le PAT devient difficile à gouverner ;
 - mesurer l’ergonomie du résumé mobile avant d’envisager une autre vue ;
 - ne jamais automatiser l’exécution Codex avec un cookie/session ChatGPT.
+
+## Planification préparée, non activée
+
+`config/schedule.json` conserve `enabled: false` et `cron_utc: null`. Il sert de garde-fou et de trace de décision ; le workflow reste exclusivement `workflow_dispatch`. Une activation ultérieure devra passer par une PR dédiée qui :
+
+1. recueille l’horaire souhaité par l’utilisateur et le convertit explicitement en UTC ;
+2. ajoute le déclencheur `schedule` au workflow de la branche par défaut ;
+3. conserve le mode manuel et les mêmes permissions en lecture seule ;
+4. vérifie le comportement GitHub documenté, notamment les retards possibles des exécutions planifiées ;
+5. valide sur iPhone le parcours complet avant de considérer l’automatisation active.

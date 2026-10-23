@@ -177,6 +177,7 @@ class CollectionTests(unittest.TestCase):
                         "title": "Recent",
                         "state": "open",
                         "draft": False,
+                        "user": {"login": "octocat"},
                         "updated_at": "2026-10-20T00:00:00Z",
                         "html_url": "https://github.com/acme/widget/pull/3",
                     },
@@ -195,6 +196,8 @@ class CollectionTests(unittest.TestCase):
                             "name": "CI",
                             "conclusion": "success",
                             "event": "push",
+                            "head_branch": "main",
+                            "pull_requests": [{"number": 3}],
                             "created_at": "2026-10-22T00:00:00Z",
                             "html_url": "https://github.com/acme/widget/actions/runs/1",
                         }
@@ -210,6 +213,9 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(result["branch"], "main")
         self.assertEqual(result["commits"][0]["message"], "Fix 'auth'")
         self.assertEqual([pull["number"] for pull in result["pull_requests"]], ["3"])
+        self.assertEqual(result["pull_requests"][0]["author"], "octocat")
+        self.assertEqual(result["workflow_runs"][0]["head_branch"], "main")
+        self.assertEqual(result["workflow_runs"][0]["pull_requests"], ["3"])
         self.assertEqual(result["changed_files"], ["src/auth.py"])
         runs_call = next(call for call in client.calls if call[0].endswith("actions/runs"))
         self.assertEqual(runs_call[1]["created"], ">=2026-10-16")
@@ -271,8 +277,68 @@ class CollectionTests(unittest.TestCase):
 class RenderingTests(unittest.TestCase):
     def test_priority_is_deterministic(self):
         priority = prioritise(sample_activity())
-        self.assertEqual(priority["level"], "haute")
+        self.assertEqual(priority["risk_level"], "élevé")
+        self.assertEqual(priority["activity_level"], "faible")
         self.assertEqual(priority["failures"], 1)
+
+    def test_dependabot_pull_requests_are_grouped_without_production_risk(self):
+        activity = sample_activity()
+        activity["commits"] = []
+        activity["changed_files"] = []
+        activity["pull_requests"] = [
+            {
+                "number": str(number),
+                "title": f"Bump package-{number} from 1.0 to 1.1",
+                "state": "open",
+                "author": "dependabot[bot]",
+                "url": f"https://github.com/acme/widget/pull/{number}",
+            }
+            for number in (10, 11)
+        ]
+        activity["workflow_runs"][0].update(
+            {"head_branch": "dependabot/pip/package-10", "pull_requests": ["10"]}
+        )
+        priority = prioritise(activity)
+        prompt = render_prompt(activity, priority)
+        self.assertEqual(priority["risk_score"], 0)
+        self.assertEqual(priority["failure_counts"]["dependency"], 1)
+        self.assertEqual(prompt.count("- Dépendances :"), 1)
+        self.assertIn("non assimilé à un incident de production", prompt)
+        self.assertIn("Vérifier ensemble les PR de dépendances regroupées", prompt)
+
+    def test_mixed_ci_results_are_marked_as_potentially_flaky(self):
+        activity = sample_activity()
+        failed = activity["workflow_runs"][0]
+        failed.update({"head_branch": "feature/x", "pull_requests": ["7"]})
+        successful = {**failed, "conclusion": "success", "url": "https://github.com/acme/widget/actions/runs/2"}
+        activity["workflow_runs"].append(successful)
+        priority = prioritise(activity)
+        prompt = render_prompt(activity, priority)
+        self.assertEqual(priority["failure_counts"]["flaky"], 1)
+        self.assertIn("signal potentiellement intermittent", prompt)
+        self.assertIn("Reproduire l’échec intermittent", prompt)
+
+    def test_successful_ci_is_archived_but_omitted_from_actionable_prompt(self):
+        activity = sample_activity()
+        activity["workflow_runs"] = [
+            {
+                "name": "tests",
+                "conclusion": "success",
+                "event": "push",
+                "head_branch": "main",
+                "pull_requests": [],
+                "url": "https://github.com/acme/widget/actions/runs/2",
+            }
+        ]
+        priority = prioritise(activity)
+        prompt = render_prompt(activity, priority)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "reports"
+            write_outputs(output, [activity])
+            report = (output / "acme" / "widget" / "report.md").read_text()
+        self.assertNotIn("CI [tests]", prompt)
+        self.assertIn("CI [tests]", report)
+        self.assertIn("success", report)
 
     def test_prompt_marks_api_metadata_as_untrusted(self):
         activity = sample_activity()

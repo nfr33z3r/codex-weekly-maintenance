@@ -36,6 +36,7 @@ Une GitHub App privée est préférable lorsque l’installation couvre une orga
 - sorties créées avec des permissions locales restrictives ;
 - artefact supprimé après 7 jours ;
 - résumé mobile limité à 500 Kio et visible uniquement aux utilisateurs autorisés du dépôt privé ;
+- lien Codex générique : aucun dépôt ni prompt sensible placé dans une URL ;
 - URL GitHub distante acceptée seulement si elle est HTTPS, canonique et interne au dépôt configuré ;
 - dépôt orchestrateur obligatoirement privé ;
 - garde d’exécution qui refuse l’analyse si GitHub ne signale pas le dépôt orchestrateur comme privé ;
@@ -48,4 +49,6 @@ Une GitHub App privée est préférable lorsque l’installation couvre une orga
 - Un sujet public ntfy est accessible à qui devine son nom ; utiliser un identifiant aléatoire long et, idéalement, un jeton ACL.
 - Les heuristiques par mots-clés peuvent produire des faux positifs ou faux négatifs.
 - Le workflow ne lit pas les alertes Dependabot/code scanning, qui demanderaient d’autres permissions.
+- Une relance manuelle peut notifier à nouveau les mêmes tâches : la déduplication inter-runs nécessiterait un état persistant ou une permission supplémentaire, volontairement absents.
+- Le rendu et la copie du Summary dans l’app GitHub iOS ne sont pas garantis par la documentation ; Safari et l’artefact ZIP sont les replis documentés.
 - Le quota hebdomadaire Codex et sa date de remise à zéro restent inconnus.
