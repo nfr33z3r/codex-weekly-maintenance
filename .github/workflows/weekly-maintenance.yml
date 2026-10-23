@@ -1,0 +1,79 @@
+name: Weekly maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Operation to run
+        required: true
+        default: analyze
+        type: choice
+        options:
+          - analyze
+          - notification-test
+      notify:
+        description: Send a generic ntfy push after analysis
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-maintenance
+  cancel-in-progress: false
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout trusted orchestrator code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Run unit tests
+        run: PYTHONPATH=src python3 -m unittest discover -s tests -v
+
+      - name: Collect seven days and generate private bundle
+        if: inputs.mode == 'analyze'
+        env:
+          MAINTENANCE_GITHUB_TOKEN: ${{ secrets.MAINTENANCE_GITHUB_TOKEN }}
+        run: PYTHONPATH=src python3 -m weekly_maintenance collect --config config/repositories.json --output reports
+
+      - name: Upload report bundle
+        if: inputs.mode == 'analyze'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: weekly-maintenance-${{ github.run_id }}
+          path: reports/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 9
+
+      - name: Count generated prompts
+        if: inputs.mode == 'analyze' && inputs.notify
+        id: report
+        run: |
+          count="$(python3 -c 'import json; print(len(json.load(open("reports/manifest.json", encoding="utf-8"))["repositories"]))')"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Send generic completion push
+        if: inputs.mode == 'analyze' && inputs.notify
+        env:
+          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+        run: >-
+          PYTHONPATH=src python3 -m weekly_maintenance notify
+          --count "${{ steps.report.outputs.count }}"
+          --click-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Send privacy-safe test push
+        if: inputs.mode == 'notification-test'
+        env:
+          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+        run: >-
+          PYTHONPATH=src python3 -m weekly_maintenance notify
+          --test
+          --click-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
