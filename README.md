@@ -9,13 +9,13 @@ La V1.2 n’utilise aucune API OpenAI payante, aucun secret ChatGPT, aucun PC al
 - Python 3, bibliothèque standard uniquement ;
 - API REST GitHub, lecture seule, sans checkout des dépôts métiers ;
 - allow-list propriétaire → identifiant dans `config/repositories.json`, avec au plus deux identifiants distincts ;
-- workflow manuel et programmé chaque lundi à 07:17 UTC (08:17 CET / 09:17 CEST à Paris) ;
+- workflow manuel uniquement tant que la mesure sûre du quota n'est pas intégrée ;
 - cartes courtes et prompts copiables depuis le résumé privé GitHub Actions, borné à 500 Kio ;
 - un rapport et un prompt par dépôt actif dans un artefact conservé 7 jours ;
 - risque et activité évalués séparément, PR de dépendances regroupées et CI contextualisée ;
 - aucun prompt pour un dépôt sans commit, PR mise à jour ou CI en échec ;
 - notification ntfy testable séparément et envoyée après analyse seulement si une tâche existe ;
-- planification hebdomadaire activée dans le workflow et documentée dans `config/schedule.json` ;
+- planification désactivée dans `config/schedule.json` ; futur déclenchement conditionnel fondé sur le reset et le quota réels ;
 - quota Codex toujours affiché comme **inconnu**.
 
 Voir [le parcours iPhone](docs/IPHONE-GUIDE.md), [le plan](docs/IMPLEMENTATION-PLAN.md), [l’étude comparative](docs/RESEARCH.md) et [le modèle de sécurité](docs/SECURITY.md).
@@ -54,7 +54,7 @@ Voir [le parcours iPhone](docs/IPHONE-GUIDE.md), [le plan](docs/IMPLEMENTATION-P
 11. Relancer avec `analyze` et `notify: true`. Vérifier que chaque propriétaire est lu uniquement par son identifiant, que l’artefact `weekly-maintenance-<run id>` existe et que sa rétention est de 7 jours.
 12. Depuis l’iPhone, suivre [le parcours iPhone](docs/IPHONE-GUIDE.md) : ouvrir l’exécution via la notification puis son **Summary**, déplier le bloc et copier le prompt. Ouvrir ensuite Codex Cloud et sélectionner manuellement le dépôt exact avant de coller le prompt.
 13. Si l’app GitHub n’affiche pas correctement le résumé ou ne permet pas une copie fiable, ouvrir le run dans Safari. Si nécessaire, télécharger l’artefact ZIP, puis utiliser `<owner>/<repo>/prompt.md` dans Fichiers.
-14. Examiner chaque PR produite par Codex avant toute fusion. Le workflow démarre aussi automatiquement chaque lundi matin ; son horaire UTC fixe décale l'heure locale lors du passage à l'heure d'été.
+14. Examiner chaque PR produite par Codex avant toute fusion. Aucun lancement calendaire automatique tant que le quota et la date réels ne peuvent pas être vérifiés.
 
 ## Utilisation locale
 
