@@ -1,5 +1,5 @@
 {
-  "enabled": false,
-  "cron_utc": null,
+  "enabled": true,
+  "cron_utc": "17 7 * * 1",
   "timezone": "Europe/Paris"
 }
