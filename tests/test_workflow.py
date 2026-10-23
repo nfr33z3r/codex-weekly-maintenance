@@ -15,13 +15,14 @@ class WorkflowSecurityTests(unittest.TestCase):
     def setUpClass(cls):
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    def test_is_manual_only(self):
+    def test_weekly_schedule_and_manual_execution(self):
         self.assertIn("workflow_dispatch:", self.workflow)
-        self.assertNotRegex(self.workflow, r"(?m)^\s+schedule:")
+        self.assertIn("  schedule:\n    - cron: '17 7 * * 1'", self.workflow)
+        self.assertIn("github.event_name == 'schedule'", self.workflow)
         schedule = json.loads(SCHEDULE.read_text(encoding="utf-8"))
         self.assertEqual(
             schedule,
-            {"enabled": False, "cron_utc": None, "timezone": "Europe/Paris"},
+            {"enabled": True, "cron_utc": "17 7 * * 1", "timezone": "Europe/Paris"},
         )
 
     def test_has_no_write_permission(self):
