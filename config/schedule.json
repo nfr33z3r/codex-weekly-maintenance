@@ -1,5 +1,6 @@
 {
-  "enabled": true,
-  "cron_utc": "17 7 * * 1",
-  "timezone": "Europe/Paris"
+  "enabled": false,
+  "cron_utc": null,
+  "timezone": "Europe/Paris",
+  "reason": "Quota-aware gate not yet available. Never schedule maintenance on calendar alone."
 }
