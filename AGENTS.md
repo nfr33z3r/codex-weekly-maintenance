@@ -12,6 +12,7 @@ Préparer une maintenance hebdomadaire assistée de plusieurs dépôts GitHub pr
 - Un quota Codex non consultable de façon sûre est **inconnu**. Ne jamais inventer de pourcentage ni de date de reset.
 - GitHub Actions n’appelle aucun LLM payant, ne clone pas et n’exécute pas le code des dépôts surveillés.
 - Dépôts surveillés explicitement autorisés, accès lecture seule et permissions minimales.
+- Chaque propriétaire GitHub est associé à un identifiant distinct via l’allow-list ; aucun repli entre identifiants.
 - Rapports et prompts privés ; notification ntfy sans nom de dépôt, diff ou information sensible.
 - Aucun changement, déploiement ou fusion automatique dans les dépôts métiers.
 - Maintenance proposée limitée à sécurité, bugs, tests, dépendances et refactoring préservant le comportement.
@@ -29,6 +30,7 @@ Préparer une maintenance hebdomadaire assistée de plusieurs dépôts GitHub pr
 ## Références locales
 
 - `docs/IMPLEMENTATION-PLAN.md` : architecture et état d’implémentation.
+- `docs/V1.1-DECISIONS.md` : décisions multi-propriétaires et expérience mobile.
 - `docs/RESEARCH.md` : comparaison des solutions évaluées et sources.
 - `docs/SECURITY.md` : modèle de menace et choix d’authentification.
 - `README.md` : installation, utilisation et activation manuelle exacte.

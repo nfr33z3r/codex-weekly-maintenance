@@ -4,7 +4,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from weekly_maintenance.notify import NotificationError, send_notification
+from weekly_maintenance.notify import NotificationError, notification_message, send_notification
 
 
 class CaptureHandler(BaseHTTPRequestHandler):
@@ -24,6 +24,16 @@ class CaptureHandler(BaseHTTPRequestHandler):
 
 
 class NotifyTests(unittest.TestCase):
+    def test_completion_message_contains_no_repository_metadata(self):
+        message = notification_message(count=2)
+        self.assertEqual(
+            message,
+            "Le rapport hebdomadaire est prêt pour 2 dépôt(s). "
+            "Quota Codex : inconnu. Ouvrir l’exécution GitHub privée.",
+        )
+        self.assertNotIn("acme/widget", message)
+        self.assertNotIn("token", message.lower())
+
     def test_rejects_insecure_or_leaky_url(self):
         with self.assertRaises(NotificationError):
             send_notification("http://ntfy.sh/topic", "hello")

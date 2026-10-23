@@ -11,6 +11,16 @@ class NotificationError(RuntimeError):
     """A safe-to-display ntfy failure."""
 
 
+def notification_message(*, count: int = 0, test: bool = False) -> str:
+    """Return a generic body that cannot contain repository metadata."""
+    if test:
+        return "Test de notification réussi. Aucune donnée de dépôt n’a été transmise."
+    return (
+        f"Le rapport hebdomadaire est prêt pour {count} dépôt(s). "
+        "Quota Codex : inconnu. Ouvrir l’exécution GitHub privée."
+    )
+
+
 def send_notification(
     topic_url: str,
     message: str,

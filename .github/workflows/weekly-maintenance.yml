@@ -29,6 +29,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Require a private orchestrator repository
+        env:
+          ORCHESTRATOR_IS_PRIVATE: ${{ github.event.repository.private }}
+        run: test "$ORCHESTRATOR_IS_PRIVATE" = "true"
+
       - name: Checkout trusted orchestrator code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -38,7 +43,8 @@ jobs:
       - name: Collect seven days and generate private bundle
         if: inputs.mode == 'analyze'
         env:
-          MAINTENANCE_GITHUB_TOKEN: ${{ secrets.MAINTENANCE_GITHUB_TOKEN }}
+          MAINTENANCE_GITHUB_TOKEN_1: ${{ secrets.MAINTENANCE_GITHUB_TOKEN_1 }}
+          MAINTENANCE_GITHUB_TOKEN_2: ${{ secrets.MAINTENANCE_GITHUB_TOKEN_2 }}
         run: PYTHONPATH=src python3 -m weekly_maintenance collect --config config/repositories.json --output reports
 
       - name: Upload report bundle
@@ -50,6 +56,10 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 9
+
+      - name: Publish copyable prompts in private run summary
+        if: inputs.mode == 'analyze'
+        run: cat reports/summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Count generated prompts
         if: inputs.mode == 'analyze' && inputs.notify
