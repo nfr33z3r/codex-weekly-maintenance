@@ -1,9 +1,6 @@
 name: Weekly maintenance
 
 on:
-  # Monday morning Paris: 08:17 CET / 09:17 CEST
-  schedule:
-    - cron: '17 7 * * 1'
   workflow_dispatch:
     inputs:
       mode:
@@ -44,14 +41,14 @@ jobs:
         run: PYTHONPATH=src python3 -m unittest discover -s tests -v
 
       - name: Collect seven days and generate private bundle
-        if: (github.event_name == 'schedule' || inputs.mode == 'analyze')
+        if: inputs.mode == 'analyze'
         env:
           MAINTENANCE_GITHUB_TOKEN_1: ${{ secrets.MAINTENANCE_GITHUB_TOKEN_1 }}
           MAINTENANCE_GITHUB_TOKEN_2: ${{ secrets.MAINTENANCE_GITHUB_TOKEN_2 }}
         run: PYTHONPATH=src python3 -m weekly_maintenance collect --config config/repositories.json --output reports
 
       - name: Upload report bundle
-        if: (github.event_name == 'schedule' || inputs.mode == 'analyze')
+        if: inputs.mode == 'analyze'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: weekly-maintenance-${{ github.run_id }}
@@ -61,18 +58,18 @@ jobs:
           compression-level: 9
 
       - name: Publish copyable prompts in private run summary
-        if: (github.event_name == 'schedule' || inputs.mode == 'analyze')
+        if: inputs.mode == 'analyze'
         run: cat reports/summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Count generated prompts
-        if: (github.event_name == 'schedule' || inputs.mode == 'analyze') && (github.event_name == 'schedule' || inputs.notify)
+        if: inputs.mode == 'analyze' && inputs.notify
         id: report
         run: |
           count="$(python3 -c 'import json; print(len(json.load(open("reports/manifest.json", encoding="utf-8"))["repositories"]))')"
           echo "count=$count" >> "$GITHUB_OUTPUT"
 
       - name: Send generic completion push
-        if: (github.event_name == 'schedule' || inputs.mode == 'analyze') && (github.event_name == 'schedule' || inputs.notify) && steps.report.outputs.count != '0'
+        if: inputs.mode == 'analyze' && inputs.notify && steps.report.outputs.count != '0'
         env:
           NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
           NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
